@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enhanced Healthcare AI Query Tool</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.21.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+  <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-2xl">
+    <h1 class="text-3xl font-bold text-center mb-6">Healthcare AI Query Tool</h1>
+    <div class="mb-4 flex space-x-2">
+      <input id="queryInput" type="text" placeholder="Ask a healthcare question..." class="flex-1 p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Healthcare query input">
+      <button id="voiceBtn" class="p-2 bg-green-500 text-white rounded-md hover:bg-green-600" aria-label="Toggle voice input">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+      </button>
+    </div>
+    <div class="flex space-x-2 mb-4">
+      <button id="submitBtn" class="flex-1 bg-blue-500 text-white p-2 rounded-md hover:bg-blue-600 disabled:bg-blue-300" disabled>Get Answer</button>
+      <div id="loadingSpinner" class="hidden animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full"></div>
+    </div>
+    <div id="answerSection" class="mb-4 hidden">
+      <h2 class="text-lg font-semibold">Answer:</h2>
+      <p id="answerText" class="text-gray-700"></p>
+    </div>
+    <div id="suggestionsSection" class="mb-4 hidden">
+      <h2 class="text-lg font-semibold">Related Search Terms:</h2>
+      <div id="suggestionsList" class="flex flex-wrap gap-2"></div>
+    </div>
+    <div id="historySection" class="mb-4">
+      <h2 class="text-lg font-semibold">Query History:</h2>
+      <ul id="historyList" class="list-disc pl-5 text-gray-700 max-h-40 overflow-y-auto"></ul>
+      <div class="flex space-x-2 mt-2">
+        <button id="clearHistoryBtn" class="bg-red-500 text-white p-2 rounded-md hover:bg-red-600">Clear History</button>
+        <button id="exportHistoryBtn" class="bg-gray-500 text-white p-2 rounded-md hover:bg-gray-600">Export History</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Healthcare question-answer dataset
+    const healthcareData = [
+      { question: "what is diabetes", answer: "Diabetes is a chronic condition where the body cannot properly regulate blood sugar levels." },
+      { question: "how to manage hypertension", answer: "Hypertension is managed with lifestyle changes, medication, and regular monitoring." },
+      { question: "what is a heart attack", answer: "A heart attack occurs when blood flow to the heart is blocked, damaging heart muscle." },
+      { question: "what causes asthma", answer: "Asthma is caused by inflammation of the airways, triggered by allergens or exercise." },
+      { question: "how to prevent flu", answer: "Prevent flu with vaccination, hand washing, and avoiding sick contacts." },
+      { question: "what is cancer", answer: "Cancer is the uncontrolled growth of abnormal cells that can spread to other body parts." },
+      { question: "what is a stroke", answer: "A stroke happens when blood flow to the brain is interrupted, causing brain cell damage." },
+      { question: "how to treat arthritis", answer: "Arthritis is treated with medication, physical therapy, and lifestyle changes." },
+      { question: "what is anemia", answer: "Anemia is a condition with low red blood cells, causing fatigue and weakness." },
+      { question: "what is telemedicine", answer: "Telemedicine delivers healthcare services remotely via digital platforms." },
+      { question: "how does insulin work", answer: "Insulin helps cells absorb glucose from the blood to regulate sugar levels." },
+      { question: "what is a vaccine", answer: "A vaccine stimulates the immune system to protect against specific diseases." },
+      { question: "what is cholesterol", answer: "Cholesterol is a fatty substance in the blood, high levels can lead to heart disease." },
+      { question: "how to improve mental health", answer: "Improve mental health with therapy, exercise, and stress management techniques." },
+      { question: "what is obesity", answer: "Obesity is excessive body fat accumulation, increasing health risks." },
+      { question: "what is an allergy", answer: "An allergy is an immune response to a substance, causing symptoms like sneezing." },
+      { question: "how to treat a cold", answer: "Treat a cold with rest, hydration, and over-the-counter medications." },
+      { question: "what is a concussion", answer: "A concussion is a brain injury caused by a blow to the head, affecting brain function." },
+      { question: "what is physical therapy", answer: "Physical therapy uses exercises to improve mobility and recover from injuries." },
+      { question: "how to prevent heart disease", answer: "Prevent heart disease with a healthy diet, exercise, and regular check-ups." },
+      { question: "what is osteoporosis", answer: "Osteoporosis is a condition causing weak, brittle bones, increasing fracture risk." },
+      { question: "how to manage chronic pain", answer: "Manage chronic pain with medication, therapy, and lifestyle adjustments." },
+      { question: "what is a kidney stone", answer: "A kidney stone is a hard deposit in the kidneys, causing pain when passed." },
+      { question: "what is immunotherapy", answer: "Immunotherapy boosts the immune system to fight diseases like cancer." },
+      { question: "how to lower blood pressure", answer: "Lower blood pressure with diet, exercise, and prescribed medications." }
+    ];
+
+    // Preprocess data: Convert text to numerical vectors
+    const vocab = _.uniq(_.flatten(healthcareData.map(item => 
+      (item.question + ' ' + item.answer).toLowerCase().split(/\s+/)))
+    ).filter(word => word.length > 2);
+    const vocabSize = vocab.length;
+
+    function textToVector(text) {
+      const words = text.toLowerCase().split(/\s+/);
+      const vector = new Array(vocabSize).fill(0);
+      words.forEach(word => {
+        const index = vocab.indexOf(word);
+        if (index !== -1) vector[index] = 1;
+      });
+      return vector;
+    }
+
+    // Prepare training data
+    const xs = healthcareData.map(item => textToVector(item.question));
+    const ys = healthcareData.map(item => textToVector(item.answer));
+
+    // Create TensorFlow.js model
+    const model = tf.sequential();
+    model.add(tf.layers.dense({ units: 256, activation: 'relu', inputShape: [vocabSize] }));
+    model.add(tf.layers.dense({ units: 128, activation: 'relu' }));
+    model.add(tf.layers.dense({ units: vocabSize, activation: 'sigmoid' }));
+    model.compile({
+      optimizer: 'adam',
+      loss: 'binaryCrossentropy',
+      metrics: ['accuracy']
+    });
+
+    // Train model
+    async function trainModel() {
+      const xsTensor = tf.tensor2d(xs);
+      const ysTensor = tf.tensor2d(ys);
+      await model.fit(xsTensor, ysTensor, {
+        epochs: 75,
+        batchSize: 8,
+        shuffle: true,
+        callbacks: {
+          onEpochEnd: (epoch, logs) => console.log(`Epoch ${epoch}: loss = ${logs.loss}`)
+        }
+      });
+      xsTensor.dispose();
+      ysTensor.dispose();
+    }
+
+    // Initialize model training
+    trainModel().then(() => {
+      submitBtn.disabled = false; // Enable button after training
+    });
+
+    // Common words to filter out
+    const stopWords = ['is', 'what', 'how', 'to', 'and', 'a', 'the', 'of', 'with', 'by', 'in'];
+
+    // Extract related search terms (prioritize phrases)
+    function getRelatedTerms(query, answer) {
+      const words = (query + ' ' + answer).toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/);
+      const phrases = [];
+      let currentPhrase = [];
+
+      words.forEach((word, i) => {
+        if (!stopWords.includes(word) && word.length > 2) {
+          currentPhrase.push(word);
+          if (currentPhrase.length === 2 || i === words.length - 1) {
+            phrases.push(currentPhrase.join(' '));
+            currentPhrase = [word];
+          }
+        } else if (currentPhrase.length) {
+          phrases.push(currentPhrase.join(' '));
+          currentPhrase = [];
+        }
+      });
+
+      const mappedPhrases = phrases.map(phrase => {
+        if (phrase.includes('diabetes')) return 'blood sugar';
+        if (phrase.includes('hypertension')) return 'high blood pressure';
+        if (phrase.includes('cancer')) return 'oncology';
+        if (phrase.includes('heart')) return 'cardiology';
+        if (phrase.includes('stroke')) return 'brain health';
+        return phrase;
+      });
+
+      return _.uniq(mappedPhrases).slice(0, 5);
+    }
+
+    // Predict answer
+    async function predictAnswer(query) {
+      const inputVector = tf.tensor2d([textToVector(query)]);
+      const prediction = model.predict(inputVector);
+      const outputVector = await prediction.array();
+      inputVector.dispose();
+      prediction.dispose();
+
+      // Find closest matching answer from dataset
+      const queryVector = textToVector(query);
+      let bestMatch = healthcareData[0].answer;
+      let maxSimilarity = 0;
+      healthcareData.forEach(item => {
+        const answerVector = textToVector(item.answer);
+        const similarity = cosineSimilarity(queryVector, answerVector);
+        if (similarity > maxSimilarity) {
+          maxSimilarity = similarity;
+          bestMatch = item.answer;
+        }
+      });
+
+      return bestMatch || "Sorry, I couldn't find a relevant answer.";
+    }
+
+    // Cosine similarity for vector comparison
+    function cosineSimilarity(vecA, vecB) {
+      const dotProduct = vecA.reduce((sum, a, i) => sum + a * vecB[i], 0);
+      const magnitudeA = Math.sqrt(vecA.reduce((sum, a) => sum + a * a, 0));
+      const magnitudeB = Math.sqrt(vecB.reduce((sum, b) => sum + b * b, 0));
+      return dotProduct / (magnitudeA * magnitudeB || 1);
+    }
+
+    // DOM elements
+    const queryInput = document.getElementById('queryInput');
+    const submitBtn = document.getElementById('submitBtn');
+    const voiceBtn = document.getElementById('voiceBtn');
+    const loadingSpinner = document.getElementById('loadingSpinner');
+    const answerSection = document.getElementById('answerSection');
+    const answerText = document.getElementById('answerText');
+    const suggestionsSection = document.getElementById('suggestionsSection');
+    const suggestionsList = document.getElementById('suggestionsList');
+    const historyList = document.getElementById('historyList');
+    const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+    const exportHistoryBtn = document.getElementById('exportHistoryBtn');
+
+    // Load query history from localStorage
+    let queryHistory = JSON.parse(localStorage.getItem('healthcareQueryHistory')) || [];
+    function updateHistoryDisplay() {
+      historyList.innerHTML = queryHistory.map((item, index) => `
+        <li class="cursor-pointer hover:text-blue-500" data-index="${index}">${item.query}</li>
+      `).join('');
+      localStorage.setItem('healthcareQueryHistory', JSON.stringify(queryHistory));
+    }
+    updateHistoryDisplay();
+
+    // Enable submit button on input
+    queryInput.addEventListener('input', () => {
+      submitBtn.disabled = !queryInput.value.trim();
+    });
+
+    // Handle query submission
+    async function handleQuery(query) {
+      if (!query) {
+        alert('Please enter a question.');
+        return;
+      }
+
+      // Show loading spinner
+      submitBtn.disabled = true;
+      loadingSpinner.classList.remove('hidden');
+
+      // Get answer
+      const answer = await predictAnswer(query);
+
+      // Update history
+      queryHistory.unshift({ query, answer });
+      if (queryHistory.length > 10) queryHistory.pop();
+      updateHistoryDisplay();
+
+      // Display answer
+      answerText.textContent = answer;
+      answerSection.classList.remove('hidden');
+
+      // Generate and display related search terms
+      const relatedTerms = getRelatedTerms(query, answer);
+      suggestionsList.innerHTML = relatedTerms.map(term => `
+        <button class="bg-gray-200 text-gray-700 px-3 py-1 rounded-md hover:bg-gray-300" onclick="document.getElementById('queryInput').value = '${term}'; document.getElementById('submitBtn').click();">${term}</button>
+      `).join('');
+      suggestionsSection.classList.remove('hidden');
+
+      // Reset UI
+      queryInput.value = '';
+      submitBtn.disabled = true;
+      loadingSpinner.classList.add('hidden');
+    }
+
+    // Submit button click
+    submitBtn.addEventListener('click', () => handleQuery(queryInput.value.trim()));
+
+    // Enter key to submit
+    queryInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter' && !submitBtn.disabled) {
+        submitBtn.click();
+      }
+    });
+
+    // Voice input
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.lang = 'en-US';
+    let isRecognizing = false;
+
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      queryInput.value = transcript;
+      submitBtn.disabled = false;
+      submitBtn.click();
+    };
+
+    recognition.onend = () => {
+      isRecognizing = false;
+      voiceBtn.classList.remove('bg-red-500', 'hover:bg-red-600');
+      voiceBtn.classList.add('bg-green-500', 'hover:bg-green-600');
+    };
+
+    voiceBtn.addEventListener('click', () => {
+      if (isRecognizing) {
+        recognition.stop();
+      } else {
+        recognition.start();
+        isRecognizing = true;
+        voiceBtn.classList.remove('bg-green-500', 'hover:bg-green-600');
+        voiceBtn.classList.add('bg-red-500', 'hover:bg-red-600');
+      }
+    });
+
+    // History item click
+    historyList.addEventListener('click', (e) => {
+      const index = e.target.dataset.index;
+      if (index !== undefined) {
+        const { query } = queryHistory[index];
+        queryInput.value = query;
+        submitBtn.disabled = false;
+        submitBtn.click();
+      }
+    });
+
+    // Clear history
+    clearHistoryBtn.addEventListener('click', () => {
+      queryHistory = [];
+      updateHistoryDisplay();
+    });
+
+    // Export history
+    exportHistoryBtn.addEventListener('click', () => {
+      const dataStr = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(queryHistory, null, 2))}`;
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute('href', dataStr);
+      downloadAnchor.setAttribute('download', 'healthcare_query_history.json');
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    });
+  </script>
+</body>
+</html>
